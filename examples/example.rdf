@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:foaf="http://xmlns.com/foaf/0.1/"
+    xmlns:org="http://www.w3.org/ns/org#"
+    xmlns:dct="http://purl.org/dc/terms/">
+
+    <!-- Person: Alice -->
+    <rdf:Description rdf:about="https://example.org/person/alice">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Person"/>
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+        <foaf:name>Alice Johnson</foaf:name>
+        <foaf:knows rdf:resource="https://example.org/person/bob"/>
+        <foaf:knows rdf:resource="https://example.org/person/charlie"/>
+        <org:memberOf rdf:resource="https://example.org/org/acme-corp"/>
+        <dct:creator rdf:resource="https://example.org/project/web-redesign"/>
+        <foaf:based_near rdf:nodeID="address1"/>
+    </rdf:Description>
+
+    <!-- Blank Node: Alice's Address -->
+    <rdf:Description rdf:nodeID="address1">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+        <rdfs:label>San Francisco Office</rdfs:label>
+        <foaf:name>San Francisco, CA</foaf:name>
+    </rdf:Description>
+
+    <!-- Person: Bob -->
+    <rdf:Description rdf:about="https://example.org/person/bob">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Person"/>
+        <foaf:name>Bob Smith</foaf:name>
+        <foaf:knows rdf:resource="https://example.org/person/alice"/>
+        <org:memberOf rdf:resource="https://example.org/org/acme-corp"/>
+        <dct:contributor rdf:resource="https://example.org/project/web-redesign"/>
+        <dct:contributor rdf:resource="https://example.org/project/data-migration"/>
+        <foaf:based_near rdf:nodeID="address1"/>
+    </rdf:Description>
+
+    <!-- Person: Charlie -->
+    <rdf:Description rdf:about="https://example.org/person/charlie">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Person"/>
+        <foaf:name>Charlie Davis</foaf:name>
+        <foaf:knows rdf:resource="https://example.org/person/alice"/>
+        <org:memberOf rdf:resource="https://example.org/org/tech-startup"/>
+        <dct:creator rdf:resource="https://example.org/project/mobile-app"/>
+        <foaf:based_near rdf:nodeID="address2"/>
+    </rdf:Description>
+
+    <!-- Blank Node: Charlie's Address -->
+    <rdf:Description rdf:nodeID="address2">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+        <rdfs:label>Austin Office</rdfs:label>
+        <foaf:name>Austin, TX</foaf:name>
+    </rdf:Description>
+
+    <!-- Person: Diana -->
+    <rdf:Description rdf:about="https://example.org/person/diana">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Person"/>
+        <foaf:name>Diana Lee</foaf:name>
+        <org:memberOf rdf:resource="https://example.org/org/tech-startup"/>
+        <dct:contributor rdf:resource="https://example.org/project/mobile-app"/>
+        <foaf:based_near rdf:nodeID="address2"/>
+    </rdf:Description>
+
+    <!-- Organization: ACME Corp -->
+    <rdf:Description rdf:about="https://example.org/org/acme-corp">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Organization"/>
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+        <foaf:name>ACME Corporation</foaf:name>
+        <org:hasMember rdf:resource="https://example.org/person/alice"/>
+        <org:hasMember rdf:resource="https://example.org/person/bob"/>
+    </rdf:Description>
+
+    <!-- Organization: Tech Startup -->
+    <rdf:Description rdf:about="https://example.org/org/tech-startup">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Organization"/>
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+        <foaf:name>Tech Startup Inc</foaf:name>
+        <org:hasMember rdf:resource="https://example.org/person/charlie"/>
+        <org:hasMember rdf:resource="https://example.org/person/diana"/>
+        <foaf:knows rdf:resource="https://example.org/org/acme-corp"/>
+    </rdf:Description>
+
+    <!-- Project: Web Redesign -->
+    <rdf:Description rdf:about="https://example.org/project/web-redesign">
+        <rdf:type rdf:resource="http://purl.org/dc/terms/Project"/>
+        <dct:title>Website Redesign Project</dct:title>
+        <dct:creator rdf:resource="https://example.org/person/alice"/>
+        <dct:contributor rdf:resource="https://example.org/person/bob"/>
+        <dct:requires rdf:nodeID="req1"/>
+    </rdf:Description>
+
+    <!-- Blank Node: Project Requirements -->
+    <rdf:Description rdf:nodeID="req1">
+        <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+        <rdfs:label>Technical Requirements</rdfs:label>
+        <foaf:name>React + TypeScript Stack</foaf:name>
+    </rdf:Description>
+
+    <!-- Project: Data Migration -->
+    <rdf:Description rdf:about="https://example.org/project/data-migration">
+        <rdf:type rdf:resource="http://purl.org/dc/terms/Project"/>
+        <dct:title>Data Migration Initiative</dct:title>
+        <dct:contributor rdf:resource="https://example.org/person/bob"/>
+    </rdf:Description>
+
+    <!-- Project: Mobile App -->
+    <rdf:Description rdf:about="https://example.org/project/mobile-app">
+        <rdf:type rdf:resource="http://purl.org/dc/terms/Project"/>
+        <dct:title>Mobile Application Development</dct:title>
+        <dct:creator rdf:resource="https://example.org/person/charlie"/>
+        <dct:contributor rdf:resource="https://example.org/person/diana"/>
+    </rdf:Description>
+
+</rdf:RDF>

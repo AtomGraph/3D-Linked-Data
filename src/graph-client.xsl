@@ -12,11 +12,15 @@
     version="3.0">
 
     <xsl:import href="normalize-rdfxml.xsl"/>
+    <xsl:import href="merge-rdfxml.xsl"/>
     <xsl:import href="3d-force-graph.xsl"/>
 
     <!-- Global parameters -->
     <xsl:param name="graph-id" select="'3d-graph'" as="xs:string"/> <!-- string: graph container element ID -->
     <xsl:param name="cors-proxy" select="'https://corsproxy.io/?'" as="xs:string"/> <!-- string: CORS proxy URL prefix -->
+    <xsl:param name="info-panel-content" as="element()">
+        <div>Click a node or link to see details<br/>Double-click a node to expand its properties</div>
+    </xsl:param>
 
     <!-- Helper function to get the graphs object from window -->
     <xsl:function name="local:get-graphs" as="item()">
@@ -31,7 +35,7 @@
 
     <!-- Main template - runs on page load -->
     <xsl:template name="main">
-        <xsl:param name="document-uri" select="xs:anyURI('examples/example.rdf')" as="xs:anyURI"/>
+        <xsl:param name="document-uri" select="xs:anyURI('https://linkeddatahub.com/demo/skos/concepts/concept17128/')" as="xs:anyURI"/>
         <xsl:param name="graph-width" select="800" as="xs:double"/>
         <xsl:param name="graph-height" select="600" as="xs:double"/>
         <xsl:param name="node-rel-size" select="6" as="xs:double"/>
@@ -56,6 +60,10 @@
             <xsl:variable name="graphs-obj" select="ixsl:eval('({})')"/>
             <ixsl:set-property name="graphs" select="$graphs-obj" object="$LinkedDataHub"/>
         </xsl:if>
+
+        <!-- Update the URI input field to show what's being loaded -->
+        <xsl:variable name="uri-input" select="id('uri-input', ixsl:page())" as="element()"/>
+        <ixsl:set-property name="value" select="string($document-uri)" object="$uri-input"/>
 
         <!-- Get container element and create ForceGraph3D builder -->
         <xsl:variable name="container" select="id($graph-id, ixsl:page())" as="element()"/>
@@ -112,7 +120,9 @@
             <xsl:result-document href="?." method="ixsl:append-content">
                 <div id="tooltip-{$graph-id}"></div>
                 <div id="info-panel">
-                    <div id="info-content-{$graph-id}">Click a node or link to see details</div>
+                    <div id="info-content-{$graph-id}">
+                        <xsl:copy-of select="$info-panel-content"/>
+                    </div>
                 </div>
             </xsl:result-document>
         </xsl:for-each>
@@ -264,7 +274,7 @@
         <xsl:variable name="info-content-id" select="concat('info-content-', $graph-id)" as="xs:string"/>
         <xsl:for-each select="id($info-content-id, ixsl:page())">
             <xsl:result-document href="?." method="ixsl:replace-content">
-                Click a node or link to see details
+                <xsl:copy-of select="$info-panel-content"/>
             </xsl:result-document>
         </xsl:for-each>
     </xsl:template>
@@ -307,7 +317,7 @@
                 <xsl:variable name="LinkedDataHub" select="ixsl:get(ixsl:window(), 'LinkedDataHub')"/>
                 <xsl:variable name="empty-rdf-doc" as="document-node()">
                     <xsl:document>
-                        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+                        <rdf:RDF/>
                     </xsl:document>
                 </xsl:variable>
                 <ixsl:set-property name="document" select="$empty-rdf-doc" object="$LinkedDataHub"/>
@@ -393,7 +403,7 @@
             <!-- Strip fragment from node URI for checking against loaded URIs -->
             <xsl:variable name="node-uri-without-fragment" select="if (contains($node-id, '#')) then substring-before($node-id, '#') else $node-id" as="xs:string"/>
 
-            <xsl:message>Current doc: <xsl:value-of select="serialize($current-doc)"/></xsl:message>
+            <!-- <xsl:message>Current doc: <xsl:value-of select="serialize($current-doc)"/></xsl:message> -->
 
             <xsl:choose>
                 <!-- Case 1: Node URI was loaded via HTTP - expand its objects -->
@@ -422,7 +432,7 @@
                         </xsl:variable>
 
                         <!-- Debug: serialize new descriptions -->
-                        <xsl:message>New descriptions to merge: <xsl:value-of select="serialize($new-descriptions)"/></xsl:message>
+                        <!-- <xsl:message>New descriptions to merge: <xsl:value-of select="serialize($new-descriptions)"/></xsl:message> -->
 
                         <!-- Update graph with new descriptions -->
                         <xsl:variable name="graph-instance" select="ixsl:get($graph-state, 'instance')"/>
@@ -499,40 +509,6 @@
 
     <xsl:template match="." mode="ixsl:onForceGraph3DBackgroundClick">
         <xsl:message>Background clicked</xsl:message>
-    </xsl:template>
-
-    <xsl:template match="@* | node()" mode="ldh:MergeRDF">
-        <xsl:copy>
-            <xsl:apply-templates select="@* | node()" mode="#current"/>
-        </xsl:copy>
-    </xsl:template>
-
-    <xsl:template match="rdf:RDF" mode="ldh:MergeRDF">
-        <xsl:param name="new-rdf" as="document-node()" tunnel="yes"/>
-
-        <xsl:copy>
-            <xsl:apply-templates select="@* | node()" mode="#current"/>
-
-            <xsl:variable name="existing-rdf" select="root(.)" as="document-node()"/>
-            <!-- Add new descriptions that don't exist in the existing document -->
-            <xsl:for-each select="$new-rdf/rdf:RDF/*[@rdf:about]">
-                <xsl:if test="not(key('resources', @rdf:about, $existing-rdf))">
-                    <xsl:apply-templates select="." mode="#current"/>
-                </xsl:if>
-            </xsl:for-each>
-        </xsl:copy>
-    </xsl:template>
-
-    <xsl:template match="rdf:Description" mode="ldh:MergeRDF">
-        <xsl:param name="new-rdf" as="document-node()" tunnel="yes"/>
-
-        <xsl:copy>
-            <xsl:apply-templates select="@* | node()" mode="#current"/>
-
-            <!-- Add new properties from $new-rdf for the same resource -->
-            <xsl:variable name="resource-uri" select="@rdf:about" as="xs:anyURI"/>
-            <xsl:apply-templates select="key('resources', $resource-uri, $new-rdf)/*" mode="#current"/>
-        </xsl:copy>
     </xsl:template>
 
 </xsl:stylesheet>

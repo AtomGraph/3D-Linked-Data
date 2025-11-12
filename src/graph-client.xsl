@@ -3,6 +3,8 @@
     xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:ixsl="http://saxonica.com/ns/interactiveXSLT"
     xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
     xmlns:ldh="https://w3id.org/atomgraph/linkeddatahub#"
     xmlns:local="http://example.org/local#"
     exclude-result-prefixes="#all"
@@ -14,6 +16,7 @@
 
     <!-- Global parameters -->
     <xsl:param name="graph-id" select="'3d-graph'" as="xs:string"/> <!-- string: graph container element ID -->
+    <xsl:param name="cors-proxy" select="'https://corsproxy.io/?'" as="xs:string"/> <!-- string: CORS proxy URL prefix -->
 
     <!-- Helper function to get the graphs object from window -->
     <xsl:function name="local:get-graphs" as="item()">
@@ -90,6 +93,18 @@
         <!-- Store graph state in LinkedDataHub.graphs -->
         <xsl:variable name="graphs" select="ixsl:get($LinkedDataHub, 'graphs')"/>
         <ixsl:set-property name="{$graph-id}" select="$graph-state" object="$graphs"/>
+
+        <!-- Initialize global RDF document (empty, will be populated on first load) -->
+        <xsl:variable name="empty-rdf-doc" as="document-node()">
+            <xsl:document>
+                <rdf:RDF/>
+            </xsl:document>
+        </xsl:variable>
+        <ixsl:set-property name="document" select="$empty-rdf-doc" object="$LinkedDataHub"/>
+
+        <!-- Initialize loaded URIs as JavaScript array (tracks URIs loaded via HTTP, not stubs) -->
+        <ixsl:set-property name="loaded-uris" select="ixsl:new('Array', [])" object="$LinkedDataHub" convert-value="no"/>
+
         <xsl:message>XSLT initialized - ready to handle graph events</xsl:message>
 
         <!-- Create tooltip and info panel UI elements -->
@@ -121,6 +136,39 @@
         <xsl:message>Camera zoomed to fit all nodes</xsl:message>
     </xsl:template>
 
+    <!-- Update graph with new RDF descriptions -->
+    <xsl:template name="update-graph">
+        <xsl:param name="new-descriptions" as="document-node()" required="yes"/>
+        <xsl:param name="current-doc" as="document-node()" required="yes"/>
+        <xsl:param name="graph-instance" as="item()" required="yes"/>
+
+        <!-- Merge new descriptions into current document using ldh:MergeRDF mode -->
+        <xsl:variable name="merged-doc" as="document-node()">
+            <xsl:document>
+                <xsl:apply-templates select="$current-doc" mode="ldh:MergeRDF">
+                    <xsl:with-param name="new-rdf" select="$new-descriptions" tunnel="yes"/>
+                </xsl:apply-templates>
+            </xsl:document>
+        </xsl:variable>
+
+        <!-- Debug: serialize merged document -->
+        <!-- <xsl:message>Merged document: <xsl:value-of select="serialize($merged-doc)"/></xsl:message> -->
+
+        <!-- Update global document -->
+        <xsl:variable name="LinkedDataHub" select="ixsl:get(ixsl:window(), 'LinkedDataHub')"/>
+        <ixsl:set-property name="document" select="$merged-doc" object="$LinkedDataHub"/>
+
+        <!-- Convert entire merged document to graph data -->
+        <xsl:variable name="graph-data" as="item()">
+            <xsl:apply-templates select="$merged-doc" mode="ldh:ForceGraph3D-convert-data"/>
+        </xsl:variable>
+
+        <!-- Update graph visualization -->
+        <xsl:sequence select="ixsl:call($graph-instance, 'graphData', [ $graph-data ], map{ 'convert-args': false() })[current-date() lt xs:date('2000-01-01')]"/>
+
+        <xsl:message>Graph updated with <xsl:value-of select="count($merged-doc/rdf:RDF/*)"/> total descriptions</xsl:message>
+    </xsl:template>
+
     <!-- Load RDF document and update graph -->
     <xsl:template name="load-and-update-graph">
         <xsl:param name="graph-id" as="xs:string"/>
@@ -129,10 +177,13 @@
 
         <xsl:message>Loading RDF data from <xsl:value-of select="$document-uri"/>...</xsl:message>
 
+        <!-- Wrap document URI with CORS proxy -->
+        <xsl:variable name="proxied-uri" select="xs:anyURI($cors-proxy || encode-for-uri($document-uri))" as="xs:anyURI"/>
+
         <!-- Create HTTP request with Accept header for RDF/XML and pool storage -->
         <xsl:variable name="request" select="map{
             'method': 'GET',
-            'href': $document-uri,
+            'href': $proxied-uri,
             'headers': map{ 'Accept': 'application/rdf+xml' },
             'pool': 'xml'
         }" as="map(*)"/>
@@ -164,45 +215,59 @@
 
         <!-- Access the parsed RDF/XML document from response body -->
         <xsl:for-each select="$response?body">
-            <xsl:variable name="rdf-doc" select="." as="document-node()"/>
-            <xsl:message>Document root element: <xsl:value-of select="name($rdf-doc/*)"/></xsl:message>
-            <xsl:message>Number of top-level children: <xsl:value-of select="count($rdf-doc/*/*)"/></xsl:message>
-
-            <!-- Normalize RDF/XML (3 passes: normalize syntax, flatten structure, resolve URIs) -->
-            <!-- Strip fragment from base URI if present -->
-            <xsl:variable name="base-uri" select="if (contains($document-uri, '#')) then xs:anyURI(substring-before($document-uri, '#')) else $document-uri" as="xs:anyURI"/>
-            <xsl:variable name="normalized-rdf" as="document-node()">
-                <xsl:apply-templates select="$rdf-doc">
-                    <xsl:with-param name="base-uri" select="$base-uri"/>
-                </xsl:apply-templates>
-            </xsl:variable>
-
-            <!-- Convert normalized RDF to graph data -->
-            <xsl:variable name="graph-data" as="item()">
-                <xsl:apply-templates select="$normalized-rdf" mode="ldh:ForceGraph3D-convert-data"/>
-            </xsl:variable>
-
-            <!-- Update graph state -->
-            <xsl:message>Updating graph visualization...</xsl:message>
-
-            <!-- Reset info panel to default state -->
-            <xsl:variable name="info-content-id" select="concat('info-content-', $graph-id)" as="xs:string"/>
-            <xsl:for-each select="id($info-content-id, ixsl:page())">
-                <xsl:result-document href="?." method="ixsl:replace-content">
-                    Click a node or link to see details
-                </xsl:result-document>
-            </xsl:for-each>
-
-            <!-- Update the stored data reference -->
-            <ixsl:set-property name="data" select="$graph-data" object="$graph-state"/>
-
-            <!-- Update the graph instance -->
-            <xsl:variable name="graph-instance" select="ixsl:get($graph-state, 'instance')"/>
-            <xsl:sequence select="ixsl:call($graph-instance, 'graphData', [ $graph-data ], map{ 'convert-args': false() })[current-date() lt xs:date('2000-01-01')]"/>
-
-            <xsl:message>Graph updated successfully from RDF</xsl:message>
+            <xsl:call-template name="process-rdf-document">
+                <xsl:with-param name="rdf-doc" select="."/>
+                <xsl:with-param name="document-uri" select="$document-uri"/>
+                <xsl:with-param name="graph-id" select="$graph-id"/>
+                <xsl:with-param name="graph-state" select="$graph-state"/>
+            </xsl:call-template>
         </xsl:for-each>
     </xsl:function>
+
+    <!-- Process RDF document: normalize, merge, and update graph -->
+    <xsl:template name="process-rdf-document" ixsl:updating="yes">
+        <xsl:param name="rdf-doc" as="document-node()" required="yes"/>
+        <xsl:param name="document-uri" as="xs:anyURI" required="yes"/>
+        <xsl:param name="graph-id" as="xs:string" required="yes"/>
+        <xsl:param name="graph-state" as="item()" required="yes"/>
+
+        <xsl:message>Document root element: <xsl:value-of select="name($rdf-doc/*)"/></xsl:message>
+        <xsl:message>Number of top-level children: <xsl:value-of select="count($rdf-doc/*/*)"/></xsl:message>
+
+        <!-- Normalize RDF/XML (3 passes: normalize syntax, flatten structure, resolve URIs) -->
+        <!-- Strip fragment from base URI if present -->
+        <xsl:variable name="base-uri" select="if (contains($document-uri, '#')) then xs:anyURI(substring-before($document-uri, '#')) else $document-uri" as="xs:anyURI"/>
+        <xsl:variable name="normalized-rdf" as="document-node()">
+            <xsl:apply-templates select="$rdf-doc">
+                <xsl:with-param name="base-uri" select="$base-uri"/>
+            </xsl:apply-templates>
+        </xsl:variable>
+
+        <!-- Get current global document and loaded URIs -->
+        <xsl:variable name="LinkedDataHub" select="ixsl:get(ixsl:window(), 'LinkedDataHub')"/>
+        <xsl:variable name="current-doc" select="ixsl:get($LinkedDataHub, 'document')" as="document-node()"/>
+        <xsl:variable name="loaded-uris" select="ixsl:get($LinkedDataHub, 'loaded-uris', map{ 'convert-result': false() })"/>
+
+        <!-- Add document URI to loaded URIs array -->
+        <xsl:sequence select="ixsl:call($loaded-uris, 'push', [ string($document-uri) ])[current-date() lt xs:date('2000-01-01')]"/>
+        <xsl:message>Added document URI to loaded-uris: <xsl:value-of select="$document-uri"/> (now <xsl:value-of select="ixsl:get($loaded-uris, 'length')"/> total)</xsl:message>
+
+        <!-- Update graph with new descriptions -->
+        <xsl:variable name="graph-instance" select="ixsl:get($graph-state, 'instance')"/>
+        <xsl:call-template name="update-graph">
+            <xsl:with-param name="new-descriptions" select="$normalized-rdf"/>
+            <xsl:with-param name="current-doc" select="$current-doc"/>
+            <xsl:with-param name="graph-instance" select="$graph-instance"/>
+        </xsl:call-template>
+
+        <!-- Reset info panel to default state -->
+        <xsl:variable name="info-content-id" select="concat('info-content-', $graph-id)" as="xs:string"/>
+        <xsl:for-each select="id($info-content-id, ixsl:page())">
+            <xsl:result-document href="?." method="ixsl:replace-content">
+                Click a node or link to see details
+            </xsl:result-document>
+        </xsl:for-each>
+    </xsl:template>
 
     <!-- Handle load errors -->
     <xsl:function name="local:handle-load-error" ixsl:updating="yes">
@@ -237,6 +302,17 @@
                 <xsl:variable name="uri" select="xs:anyURI($uri-string)" as="xs:anyURI"/>
 
                 <xsl:message>Loading RDF from: <xsl:value-of select="$uri"/></xsl:message>
+
+                <!-- Reset global state (document and loaded URIs) -->
+                <xsl:variable name="LinkedDataHub" select="ixsl:get(ixsl:window(), 'LinkedDataHub')"/>
+                <xsl:variable name="empty-rdf-doc" as="document-node()">
+                    <xsl:document>
+                        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+                    </xsl:document>
+                </xsl:variable>
+                <ixsl:set-property name="document" select="$empty-rdf-doc" object="$LinkedDataHub"/>
+                <ixsl:set-property name="loaded-uris" select="ixsl:new('Array', [])" object="$LinkedDataHub" convert-value="no"/>
+                <xsl:message>Reset global document and loaded-uris</xsl:message>
 
                 <xsl:call-template name="load-and-update-graph">
                     <xsl:with-param name="graph-id" select="$graph-id"/>
@@ -309,23 +385,66 @@
 
         <!-- Only load if node-id is a valid HTTP(S) URI -->
         <xsl:if test="starts-with($node-id, 'http://') or starts-with($node-id, 'https://')">
-            <!-- Use global $graph-id parameter -->
             <xsl:variable name="graph-state" select="local:get-graph-state($graph-id)"/>
+            <xsl:variable name="LinkedDataHub" select="ixsl:get(ixsl:window(), 'LinkedDataHub')"/>
+            <xsl:variable name="current-doc" select="ixsl:get($LinkedDataHub, 'document')" as="document-node()"/>
+            <xsl:variable name="loaded-uris" select="ixsl:get($LinkedDataHub, 'loaded-uris', map{ 'convert-result': false() })"/>
 
-            <!-- Strip fragment from node-id to get document URI -->
-            <xsl:variable name="document-uri" select="if (contains($node-id, '#')) then substring-before($node-id, '#') else $node-id" as="xs:string"/>
+            <!-- Strip fragment from node URI for checking against loaded URIs -->
+            <xsl:variable name="node-uri-without-fragment" select="if (contains($node-id, '#')) then substring-before($node-id, '#') else $node-id" as="xs:string"/>
 
-            <!-- Test: retrieve and serialize the node description -->
-            <xsl:variable name="description" select="key('resources', $node-id, doc($document-uri))"/>
-            <xsl:message>Description: <xsl:value-of select="serialize($description)"/></xsl:message>
+            <xsl:message>Current doc: <xsl:value-of select="serialize($current-doc)"/></xsl:message>
 
-            <xsl:message>Loading RDF from double-clicked node: <xsl:value-of select="$document-uri"/></xsl:message>
+            <xsl:choose>
+                <!-- Case 1: Node URI was loaded via HTTP - expand its objects -->
+                <xsl:when test="ixsl:call($loaded-uris, 'includes', [ $node-uri-without-fragment ])">
+                    <xsl:message>Node <xsl:value-of select="$node-id"/> already loaded</xsl:message>
 
-            <xsl:call-template name="load-and-update-graph">
-                <xsl:with-param name="graph-id" select="$graph-id"/>
-                <xsl:with-param name="document-uri" select="xs:anyURI($document-uri)"/>
-                <xsl:with-param name="graph-state" select="$graph-state"/>
-            </xsl:call-template>
+                    <xsl:variable name="description" select="key('resources', $node-id, $current-doc)"/>
+
+                    <!-- Get all object resource URIs from the description that don't already have descriptions -->
+                    <xsl:variable name="object-uris" select="distinct-values($description/*/@rdf:resource)[not(key('resources', ., $current-doc))]" as="xs:anyURI*"/>
+
+                    <xsl:if test="exists($object-uris)">
+                        <xsl:message>Expanding <xsl:value-of select="count($object-uris)"/> object resources</xsl:message>
+
+                        <!-- Create new descriptions for object resources -->
+                        <xsl:variable name="new-descriptions" as="document-node()">
+                            <xsl:document>
+                                <rdf:RDF>
+                                    <xsl:for-each select="$object-uris">
+                                        <rdf:Description rdf:about="{.}">
+                                            <rdfs:label><xsl:value-of select="tokenize(., '[/#]')[last()]"/></rdfs:label>
+                                        </rdf:Description>
+                                    </xsl:for-each>
+                                </rdf:RDF>
+                            </xsl:document>
+                        </xsl:variable>
+
+                        <!-- Debug: serialize new descriptions -->
+                        <xsl:message>New descriptions to merge: <xsl:value-of select="serialize($new-descriptions)"/></xsl:message>
+
+                        <!-- Update graph with new descriptions -->
+                        <xsl:variable name="graph-instance" select="ixsl:get($graph-state, 'instance')"/>
+                        <xsl:call-template name="update-graph">
+                            <xsl:with-param name="new-descriptions" select="$new-descriptions"/>
+                            <xsl:with-param name="current-doc" select="$current-doc"/>
+                            <xsl:with-param name="graph-instance" select="$graph-instance"/>
+                        </xsl:call-template>
+                    </xsl:if>
+                </xsl:when>
+
+                <!-- Case 2: Node URI not loaded - load from HTTP -->
+                <xsl:otherwise>
+                    <xsl:message>Node <xsl:value-of select="$node-id"/> not loaded - fetching via HTTP: <xsl:value-of select="$node-uri-without-fragment"/></xsl:message>
+
+                    <xsl:call-template name="load-and-update-graph">
+                        <xsl:with-param name="graph-id" select="$graph-id"/>
+                        <xsl:with-param name="document-uri" select="xs:anyURI($node-uri-without-fragment)"/>
+                        <xsl:with-param name="graph-state" select="$graph-state"/>
+                    </xsl:call-template>
+                </xsl:otherwise>
+            </xsl:choose>
         </xsl:if>
     </xsl:template>
 
@@ -380,6 +499,40 @@
 
     <xsl:template match="." mode="ixsl:onForceGraph3DBackgroundClick">
         <xsl:message>Background clicked</xsl:message>
+    </xsl:template>
+
+    <xsl:template match="@* | node()" mode="ldh:MergeRDF">
+        <xsl:copy>
+            <xsl:apply-templates select="@* | node()" mode="#current"/>
+        </xsl:copy>
+    </xsl:template>
+
+    <xsl:template match="rdf:RDF" mode="ldh:MergeRDF">
+        <xsl:param name="new-rdf" as="document-node()" tunnel="yes"/>
+
+        <xsl:copy>
+            <xsl:apply-templates select="@* | node()" mode="#current"/>
+
+            <xsl:variable name="existing-rdf" select="root(.)" as="document-node()"/>
+            <!-- Add new descriptions that don't exist in the existing document -->
+            <xsl:for-each select="$new-rdf/rdf:RDF/*[@rdf:about]">
+                <xsl:if test="not(key('resources', @rdf:about, $existing-rdf))">
+                    <xsl:apply-templates select="." mode="#current"/>
+                </xsl:if>
+            </xsl:for-each>
+        </xsl:copy>
+    </xsl:template>
+
+    <xsl:template match="rdf:Description" mode="ldh:MergeRDF">
+        <xsl:param name="new-rdf" as="document-node()" tunnel="yes"/>
+
+        <xsl:copy>
+            <xsl:apply-templates select="@* | node()" mode="#current"/>
+
+            <!-- Add new properties from $new-rdf for the same resource -->
+            <xsl:variable name="resource-uri" select="@rdf:about" as="xs:anyURI"/>
+            <xsl:apply-templates select="key('resources', $resource-uri, $new-rdf)/*" mode="#current"/>
+        </xsl:copy>
     </xsl:template>
 
 </xsl:stylesheet>

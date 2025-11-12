@@ -8,6 +8,7 @@
     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
     xmlns:foaf="http://xmlns.com/foaf/0.1/"
     xmlns:dct="http://purl.org/dc/terms/"
+    xmlns:skos="http://www.w3.org/2004/02/skos/core#"
     xmlns:ac="https://w3id.org/atomgraph/client#"
     xmlns:ldh="https://w3id.org/atomgraph/linkeddatahub#"
     exclude-result-prefixes="#all"
@@ -18,6 +19,7 @@
     <xsl:key name="resources" match="*[*][@rdf:about] | *[*][@rdf:nodeID]" use="@rdf:about | @rdf:nodeID"/>
 
     <!-- Function to calculate node color from resource type URI(s) by averaging hues -->
+    <!-- Uses a simple hash function to deterministically derive hue from URI string -->
     <xsl:function name="ldh:force-graph-3d-node-color" as="xs:string">
         <xsl:param name="resource" as="element()"/>
 
@@ -25,7 +27,14 @@
             <xsl:variable name="type-uris" select="rdf:type/@rdf:resource" as="xs:anyURI*"/>
             <xsl:choose>
                 <xsl:when test="exists($type-uris)">
-                    <xsl:variable name="hues" select="for $type in $type-uris return random-number-generator($type)?number * 360" as="xs:double*"/>
+                    <!-- Generate hues from URI strings using simple hash (sum of codepoints mod 360) -->
+                    <xsl:variable name="hues" as="xs:double*">
+                        <xsl:for-each select="$type-uris">
+                            <xsl:variable name="uri-string" select="string(.)" as="xs:string"/>
+                            <xsl:variable name="codepoint-sum" select="sum(string-to-codepoints($uri-string))" as="xs:integer"/>
+                            <xsl:sequence select="$codepoint-sum mod 360"/>
+                        </xsl:for-each>
+                    </xsl:variable>
                     <xsl:variable name="avg-hue" select="avg($hues)" as="xs:double"/>
                     <!-- 70% saturation, 60% lightness = vibrant colors visible on black background -->
                     <xsl:sequence select="'hsl(' || $avg-hue || ', 70%, 60%)'"/>
@@ -43,13 +52,30 @@
 
         <xsl:for-each select="$resource">
             <xsl:choose>
-                <xsl:when test="foaf:name[not(@rdf:resource)]">
+                <!-- Prefer English labels -->
+                <xsl:when test="skos:prefLabel[lang('en')]">
+                    <xsl:sequence select="string(skos:prefLabel[lang('en')][1])"/>
+                </xsl:when>
+                <xsl:when test="foaf:name[lang('en')]">
+                    <xsl:sequence select="string(foaf:name[lang('en')][1])"/>
+                </xsl:when>
+                <xsl:when test="rdfs:label[lang('en')]">
+                    <xsl:sequence select="string(rdfs:label[lang('en')][1])"/>
+                </xsl:when>
+                <xsl:when test="dct:title[lang('en')]">
+                    <xsl:sequence select="string(dct:title[lang('en')][1])"/>
+                </xsl:when>
+                <!-- Fallback to any language -->
+                <xsl:when test="skos:prefLabel">
+                    <xsl:sequence select="string(skos:prefLabel[1])"/>
+                </xsl:when>
+                <xsl:when test="foaf:name">
                     <xsl:sequence select="string(foaf:name[1])"/>
                 </xsl:when>
-                <xsl:when test="rdfs:label[not(@rdf:resource)]">
+                <xsl:when test="rdfs:label">
                     <xsl:sequence select="string(rdfs:label[1])"/>
                 </xsl:when>
-                <xsl:when test="dct:title[not(@rdf:resource)]">
+                <xsl:when test="dct:title">
                     <xsl:sequence select="string(dct:title[1])"/>
                 </xsl:when>
                 <xsl:otherwise>

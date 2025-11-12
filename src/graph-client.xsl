@@ -17,7 +17,7 @@
 
     <!-- Global parameters -->
     <xsl:param name="graph-id" select="'3d-graph'" as="xs:string"/> <!-- string: graph container element ID -->
-    <xsl:param name="cors-proxy" select="'https://corsproxy.io/?'" as="xs:string"/> <!-- string: CORS proxy URL prefix -->
+    <xsl:param name="cors-proxy" select="'https://corsproxy.io/'" as="xs:string"/> <!-- string: CORS proxy URL prefix -->
     <xsl:param name="info-panel-content" as="element()">
         <div>Click a node or link to see details<br/>Double-click a node to expand its properties</div>
     </xsl:param>
@@ -188,7 +188,7 @@
         <xsl:message>Loading RDF data from <xsl:value-of select="$document-uri"/>...</xsl:message>
 
         <!-- Wrap document URI with CORS proxy -->
-        <xsl:variable name="proxied-uri" select="xs:anyURI($cors-proxy || encode-for-uri($document-uri))" as="xs:anyURI"/>
+        <xsl:variable name="proxied-uri" select="xs:anyURI($cors-proxy || '?url=' || encode-for-uri($document-uri))" as="xs:anyURI"/>
 
         <!-- Create HTTP request with Accept header for RDF/XML and pool storage -->
         <xsl:variable name="request" select="map{
